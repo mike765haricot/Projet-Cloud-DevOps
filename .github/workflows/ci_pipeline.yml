@@ -1,0 +1,69 @@
+name: CI Pipeline
+
+# Déclenchement : À chaque push sur la branche principale
+on:
+  push:
+    branches: [ "master", "main" ]
+
+# Définition des variables
+env:
+  REGISTRY: ghcr.io
+  # On utilise le nom du dépôt GitHub comme nom d'image
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # JOB 1 : Exécution des Tests (Qualité)
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Installation des dépendances
+        run: |
+          pip install -r app/requirements.txt
+          pip install pytest
+
+      - name: Lancement des Tests
+        # Vos tests utilisent le cache mocké, donc pas besoin de clé Azure ici !
+        run: pytest
+
+  # JOB 2 : Construction et Envoi de l'image Docker
+  build-and-push-image:
+    needs: run-tests # N'exécute ceci QUE si les tests ont réussi
+    runs-on: ubuntu-latest
+    
+    # Permissions nécessaires pour écrire dans le registre GitHub
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Connexion au GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Convertir le nom de l'image en minuscules
+        # Docker interdit les majuscules. Cette étape corrige votre nom de repo.
+        run: |
+          echo "IMAGE_NAME=${IMAGE_NAME,,}" >>${GITHUB_ENV}
+
+      - name: Construction et Push de l'image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
